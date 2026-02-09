@@ -1,4 +1,4 @@
-name: Scan and Deploy to EC2
+name: Cortex CLI Code Scan
 
 on:
   push:
@@ -7,48 +7,49 @@ on:
   workflow_dispatch:
 
 env:
-  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
-  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
-  # URL 변수 정의
+  CORTEX_API_KEY: ${{secrets.CORTEX_API_KEY}}
+  CORTEX_API_KEY_ID: ${{secrets.CORTEX_API_KEY_ID}}
   CORTEX_API_URL: https://api-u-infra-260126-xdr.xdr.sg.paloaltonetworks.com
-
+  
 jobs:
-  security-scan:
+  cortex-code-scan:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
-      - name: Download and Run Cortex CLI Scan
-        run: |
-          set -x
-          # 1. 다운로드 링크 가져오기 (env 변수 사용)
-          crtx_resp=$(curl "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
-            -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" \
-            -H "Authorization: ${{ env.CORTEX_API_KEY }}")
-          
-          # 2. URL 추출
-          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
-          
-          # 3. 파일 다운로드 및 실행 권한 부여
-          curl -o cortexcli "$crtx_url"
-          chmod +x cortexcli
-          
-          # 4. 스캔 실행 (변수를 한 줄로 안전하게 전달)
-          ./cortexcli code scan \
-            --api-base-url "${{ env.CORTEX_API_URL }}" \
-            --api-key "${{ env.CORTEX_API_KEY }}" \
-            --api-key-id "${{ env.CORTEX_API_KEY_ID }}" \
-            --directory "${{ github.workspace }}" \
-            --repo-id "${{ github.repository }}" \
-            --branch "${{ github.ref_name }}" \
-            --source "GITHUB_ACTIONS" \
-            --create-repo-if-missing
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Verify Node.js Version
+      run: node -v
+
+    - name: Download cortexcli
+      run: |
+        set -x
+        crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+          -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+          -H "Authorization: ${CORTEX_API_KEY}")
+        crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+        curl -o cortexcli $crtx_url
+        chmod +x cortexcli
+        ./cortexcli --version
+
+    - name: Run Cortex CLI Code Scan
+      run: |
+        ./cortexcli \
+          --api-base-url "${CORTEX_API_URL}" \
+          --api-key "${CORTEX_API_KEY}" \
+          --api-key-id "${CORTEX_API_KEY_ID}" \
+          code scan \
+          --directory "${{github.workspace}}" \
+          --repo-id "${{github.repository}}" \
+          --branch "${{github.ref_name}}" \
+          --source "GITHUB_ACTIONS" \
+          --create-repo-if-missing
 
   deploy:
     needs: security-scan
