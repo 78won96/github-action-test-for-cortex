@@ -95,11 +95,15 @@ jobs:
             docker stop my-web-server || true
             docker rm my-web-server || true
 
-            # 2. AWS CLI 설치 (Ubuntu, ECR 로그인에 필요)
-            sudo apt-get update -qq
-            sudo add-apt-repository -y universe 2>/dev/null || true
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq awscli
+            # 2. AWS CLI v2 설치 (Ubuntu 24.04 등에서 awscli 패키지 미제공 시 대비, 공식 바이너리 사용)
+            if ! command -v aws &>/dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq unzip curl
+              curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              unzip -q -o awscliv2.zip
+              sudo ./aws/install
+              rm -rf awscliv2.zip aws
+            fi
 
             # 3. ECR 로그인 (EC2 인스턴스에 IAM 역할 또는 AWS 자격 증명 필요)
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
