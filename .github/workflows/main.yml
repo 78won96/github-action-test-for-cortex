@@ -27,10 +27,8 @@ jobs:
       - name: Download and Run Cortex CLI Scan
         run: |
           set -x
-          # 1. 다운로드 링크 가져오기 (env 변수 사용)
-          crtx_resp=$(curl "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
-            -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" \
-            -H "Authorization: ${{ env.CORTEX_API_KEY }}")
+          # 1. 다운로드 URL 가져오기
+          crtx_resp=$(curl "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" -H "Authorization: ${{ env.CORTEX_API_KEY }}")
           
           # 2. URL 추출
           crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
@@ -39,16 +37,8 @@ jobs:
           curl -o cortexcli "$crtx_url"
           chmod +x cortexcli
           
-          # 4. 스캔 실행 (변수를 한 줄로 안전하게 전달)
-          ./cortexcli code scan \
-            --api-base-url "${{ env.CORTEX_API_URL }}" \
-            --api-key "${{ env.CORTEX_API_KEY }}" \
-            --api-key-id "${{ env.CORTEX_API_KEY_ID }}" \
-            --directory "${{ github.workspace }}" \
-            --repo-id "${{ github.repository }}" \
-            --branch "${{ github.ref_name }}" \
-            --source "GITHUB_ACTIONS" \
-            --create-repo-if-missing
+          # 4. 스캔 실행 (가장 중요: 절대로 줄을 나누지 마세요)
+          ./cortexcli code scan --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "${{ github.ref_name }}" --source "GITHUB_ACTIONS" --create-repo-if-missing
 
   deploy:
     needs: security-scan
