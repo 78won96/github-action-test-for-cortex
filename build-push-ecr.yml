@@ -35,11 +35,12 @@ jobs:
       - name: Download and Run Cortex CLI Scan
         run: |
           set -x
-          crtx_resp=$(curl "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" -H "Authorization: ${{ env.CORTEX_API_KEY }}")
+          crtx_resp=$(curl -s "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" -H "Authorization: ${{ env.CORTEX_API_KEY }}")
           crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
-          curl -o cortexcli "$crtx_url"
-          chmod +x cortexcli
-          ./cortexcli --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS" --create-repo-if-missing
+          crtx_file=$(echo $crtx_resp | jq -r ".file_name")
+          curl -o "$crtx_file" "$crtx_url"
+          chmod +x "$crtx_file"
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS" --create-repo-if-missing
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
