@@ -1,85 +1,89 @@
-# Docker 이미지 ECR 푸시 및 EC2 배포 (워크플로 분리)
+# Docker 이미지 빌드·Cortex 스캔·ECR 푸시 및 EC2 배포
 
-**github-action-test-for-cortex** 리포지토리에서는 워크플로를 두 개로 나눕니다.
+**github-action-test-for-cortex** 리포지토리는 **단일 워크플로** `main.yml`로 다음을 수행합니다.
 
-| 워크플로 | 파일 | 역할 |
-|----------|------|------|
-| **Build and Push to ECR** | `build-push-ecr.yml` | Dockerfile로 이미지 빌드 후 **AWS ECR에 push** |
-| **Scan and Deploy to EC2** | `main.yml` | Cortex 보안 스캔 후 EC2에서 **ECR에 push된 이미지를 pull → docker run** |
+- Docker 이미지 빌드 → **Cortex CLI로 이미지 스캔** → ECR 푸시  
+- 이어서 EC2에서 ECR 이미지 pull → **동일 이미지 Cortex 스캔** → docker run
+
+---
+
+## 워크플로 개요
+
+| 항목 | 내용 |
+|------|------|
+| **파일** | `.github/workflows/main.yml` |
+| **이름** | Build, Scan, Push to ECR and Deploy to EC2 |
+| **트리거** | `main` 브랜치 push, `workflow_dispatch`(수동) |
 
 ---
 
 ## 전체 흐름
 
-1. 코드(및 Dockerfile)를 **GitHub `github-action-test-for-cortex` 리포지토리에 push**
-2. **build-push-ecr.yml** 실행: 이미지 빌드 → ECR에 push (`latest` 및 커밋 SHA 태그)
-3. **main.yml** 실행: Cortex 스캔 → EC2에 SSH 접속 → ECR 로그인 → **ECR 이미지 pull** → **docker run**으로 배포
+1. **build-scan-push** job (GitHub Actions runner)
+   - Checkout → **이미지 빌드** (`ECR_REPOSITORY:build`)
+   - Java 11 설치 → libhyperscan5 설치 (cortexcli 의존성)
+   - Cortex CLI 다운로드 → **빌드된 이미지 스캔** (`image scan`)
+   - AWS 자격 증명 → ECR 로그인 → 이미지 태그 및 **ECR 푸시** (`latest`, 커밋 SHA)
 
-두 워크플로는 모두 `main` 브랜치 push 시 트리거됩니다. main.yml이 ECR의 `latest` 이미지를 사용하므로, 배포 직전에 build-push-ecr이 완료되어 있으면 방금 빌드한 이미지가 배포됩니다. (동시 실행 시에는 이전에 push된 `latest`가 pull될 수 있음.)
+2. **deploy** job (`needs: build-scan-push`, EC2에서 스크립트 실행)
+   - 기존 `my-web-server` 컨테이너 정리
+   - ECR 로그인 → **이미지 pull** (`latest`)
+   - Cortex CLI 설치(Java, libhyperscan5, jq) → **Pull한 이미지 스캔**
+   - 스캔 통과 후 **docker run** (포트 80)
+
+즉, **리포지토리**는 빌드·스캔·푸시만 하고, **EC2**는 pull·스캔·실행만 담당합니다.
 
 ---
 
-## 1. build-push-ecr.yml — 이미지를 ECR에 push
+## Job 1: build-scan-push
 
 ### 역할
 
-- 리포지토리 체크아웃
-- AWS 자격 증명 설정 → ECR 로그인
-- `docker build` → ECR 주소로 태그 → `docker push`
+- Dockerfile로 이미지 빌드
+- **Cortex CLI image scan**으로 빌드된 이미지 스캔 (리포지토리 디렉터리 스캔 아님)
+- 스캔 통과 시 ECR에 푸시
 
-### 파일 위치
+### Runner 요구사항 (워크플로에서 처리)
 
-- **실제 동작용**: `.github/workflows/build-push-ecr.yml`  
-  (이 경로에 있어야 GitHub Actions가 실행함)
-- **참고/백업용**: 프로젝트 루트의 `build-push-ecr.yml`을 위 경로로 복사해 사용
+- Java 11 이상 → `actions/setup-java@v4` (Temurin 11)
+- `libhs.so.5` → `libhyperscan5` 패키지 설치
+- Cortex CLI → API로 다운로드 (`signed_url`, `file_name` 사용)
 
-### 필요한 GitHub Secrets
+### 사용 env / secrets
 
-| Secret | 설명 |
-|--------|------|
-| `AWS_ACCESS_KEY_ID` | ECR에 push 가능한 IAM 사용자 Access Key ID |
-| `AWS_SECRET_ACCESS_KEY` | 해당 IAM 사용자 Secret Access Key |
-
-### 워크플로 요약
-
-- **트리거**: `main` push, `workflow_dispatch`(수동)
-- **이미지 태그**: `latest`, `${{ github.sha }}`
-- **env**: `AWS_REGION`, `ECR_REPOSITORY` (필요 시 수정)
+- **env**: `AWS_REGION`, `ECR_REPOSITORY`, `CORTEX_API_URL`, `CORTEX_API_KEY`, `CORTEX_API_KEY_ID`
+- **secrets**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
 
 ---
 
-## 2. main.yml — ECR 이미지로 EC2에서 docker run
+## Job 2: deploy
 
 ### 역할
 
-1. **security-scan**: Cortex CLI로 코드 스캔
-2. **deploy**: EC2에 SSH 접속 후  
-   - 기존 `my-web-server` 컨테이너 중지/삭제  
-   - **ECR 로그인** → **ECR 이미지 pull** → **docker run** (포트 80)
+- EC2에 SSH 접속 후:
+  1. 기존 컨테이너 정리
+  2. ECR 로그인 → **docker pull** (`latest`)
+  3. **Cortex CLI로 Pull한 이미지 스캔** (`image scan <ECR_IMAGE>`)
+  4. 스캔 통과 후 `docker run`으로 배포
 
-즉, **build-push-ecr에서 ECR에 push한 이미지**를 EC2에서 pull해서 실행합니다.
+### EC2에서 필요한 것
 
-### 파일 위치
+- Docker, AWS CLI
+- ECR pull 권한 (IAM 인스턴스 프로파일 또는 AWS 자격 증명)
+- Cortex CLI 실행을 위한 패키지: **Java 11+**, **libhyperscan5**, **jq**  
+  → 스크립트에서 `apt-get`으로 설치 시도 (`openjdk-11-jre-headless`, `libhyperscan5`, `jq`)
 
-- `.github/workflows/main.yml`
+### 사용 env / secrets
 
-### Deploy에 필요한 설정
-
-- **GitHub Secrets**: `EC2_HOST`, `EC2_SSH_KEY` (기존), **`AWS_ACCOUNT_ID`** (ECR 주소 구성용, 예: `123456789012`)
-- **env**: `AWS_REGION`, `ECR_REPOSITORY` (main.yml 상단 env에 정의됨)
-
-### EC2 측 요구사항
-
-- Docker, AWS CLI 설치
-- **ECR에서 이미지를 pull할 수 있는 자격 증명**  
-  - 권장: EC2 **IAM 인스턴스 프로파일**에 `ecr:GetAuthorizationToken`, `ecr:BatchGetImage` 등 ECR 읽기 권한 부여  
-  - 또는 EC2에 AWS 자격 증명 설정 후 `aws ecr get-login-password` 사용
+- **env**: `AWS_REGION`, `ECR_REPOSITORY`, `CORTEX_API_URL` (스크립트에 치환되어 전달)
+- **secrets**: `EC2_HOST`, `EC2_SSH_KEY`, `AWS_ACCOUNT_ID`, `CORTEX_API_KEY`, `CORTEX_API_KEY_ID`  
+  (EC2는 GitHub에 접근할 수 없으므로, 스크립트 안에서 위 값들이 runner에서 치환된 뒤 EC2에서 사용됨)
 
 ---
 
-## 3. 사전 준비 (한 번만)
+## 사전 준비
 
-### 3.1 AWS ECR 저장소 생성
+### 1. AWS ECR 저장소 생성 (최초 1회)
 
 ```bash
 aws ecr create-repository \
@@ -87,54 +91,53 @@ aws ecr create-repository \
   --region ap-northeast-2
 ```
 
-### 3.2 GitHub Secrets 설정
+### 2. GitHub Secrets 설정
 
 리포지토리 **Settings → Secrets and variables → Actions**에서 등록:
 
-| Secret | 사용 워크플로 | 설명 |
-|--------|----------------|------|
-| `AWS_ACCESS_KEY_ID` | build-push-ecr | ECR push용 IAM Access Key ID |
-| `AWS_SECRET_ACCESS_KEY` | build-push-ecr | 해당 IAM Secret Access Key |
-| `AWS_ACCOUNT_ID` | main | ECR 레지스트리 주소용 (예: `123456789012`) |
-| `EC2_HOST` | main | 배포 대상 EC2 호스트 |
-| `EC2_SSH_KEY` | main | EC2 SSH 비밀키 |
-| `CORTEX_API_KEY` | main | Cortex 스캔용 (기존) |
-| `CORTEX_API_KEY_ID` | main | Cortex 스캔용 (기존) |
+| Secret | 사용처 | 설명 |
+|--------|--------|------|
+| `AWS_ACCESS_KEY_ID` | build-scan-push | ECR 푸시용 IAM Access Key ID |
+| `AWS_SECRET_ACCESS_KEY` | build-scan-push | 해당 IAM Secret Access Key |
+| `AWS_ACCOUNT_ID` | deploy (EC2 스크립트) | ECR 레지스트리 주소 구성 (예: `123456789012`) |
+| `EC2_HOST` | deploy | 배포 대상 EC2 호스트 |
+| `EC2_SSH_KEY` | deploy | EC2 SSH 비밀키 |
+| `CORTEX_API_KEY` | build-scan-push, deploy | Cortex API 키 (CLI 다운로드·이미지 스캔) |
+| `CORTEX_API_KEY_ID` | build-scan-push, deploy | Cortex API 키 ID |
 
-### 3.3 GitHub에 코드 푸시
+### 3. 워크플로 env (main.yml 상단)
+
+- `AWS_REGION`: 예) `ap-northeast-2`
+- `ECR_REPOSITORY`: 예) `github-action-test-for-cortex`
+- `CORTEX_API_URL`: Cortex API URL (예: `https://api-u-infra-260126-xdr.xdr.sg.paloaltonetworks.com`)
+- `CORTEX_API_KEY`, `CORTEX_API_KEY_ID`: secrets 참조
+
+### 4. GitHub에 코드 푸시
 
 ```bash
 git add .
-git commit -m "Add Dockerfile and workflows"
+git commit -m "Add Dockerfile and workflow"
 git push origin main
 ```
 
-- **build-push-ecr**를 사용하려면 `.github/workflows/build-push-ecr.yml`이 포함되어 있어야 합니다.  
-  루트의 `build-push-ecr.yml`을 복사해 두었으면:
-
-  ```bash
-  cp build-push-ecr.yml .github/workflows/build-push-ecr.yml
-  git add .github/workflows/build-push-ecr.yml
-  git commit -m "Add ECR build-push workflow"
-  git push origin main
-  ```
+`main` push 시 위 워크플로가 한 번에 실행됩니다.
 
 ---
 
-## 4. 실행 순서 요약
+## 실행 순서 요약
 
-- **build-push-ecr.yml**: push 시 이미지 빌드 후 ECR에 push.
-- **main.yml**: push 시 스캔 후 EC2에서 ECR 이미지(`latest`)를 pull해 docker run.
+1. **build-scan-push**  
+   빌드 → (Java, libhyperscan5, Cortex CLI 준비) → **이미지 스캔** → ECR 푸시  
+2. **deploy** (build-scan-push 성공 후)  
+   EC2에서 pull → **이미지 스캔** → docker run  
 
-같은 push에 두 워크플로가 모두 돌면, main의 deploy가 먼저 끝나면 **이전에 ECR에 올라간 `latest`**가 배포될 수 있습니다. **방금 빌드한 이미지**를 배포하려면:
-
-- build-push-ecr을 먼저 실행한 뒤, main을 수동 실행하거나  
-- main.yml을 **workflow_run**으로 “Build and Push to ECR” 완료 후에만 실행되도록 바꿀 수 있습니다.
+같은 이미지가 runner에서 한 번, EC2에서 한 번 Cortex CLI `image scan`으로 검사됩니다.
 
 ---
 
-## 5. 참고
+## 참고
 
-- **리전**: 예시는 `ap-northeast-2`(서울). `build-push-ecr.yml`과 `main.yml`의 `AWS_REGION`을 사용 중인 리전에 맞게 수정하세요.
+- **리전**: 예시는 `ap-northeast-2`(서울). `main.yml`의 `AWS_REGION`을 사용 중인 리전에 맞게 수정하세요.
 - **계정 ID 확인**: `aws sts get-caller-identity --query Account --output text`
-- **ECR 이미지 확인**: AWS 콘솔 → ECR → 해당 리포지토리에서 `latest` 및 SHA 태그 확인.
+- **ECR 이미지**: AWS 콘솔 → ECR → 해당 리포지토리에서 `latest` 및 커밋 SHA 태그 확인.
+- **EC2 OS**: deploy 스크립트의 패키지 설치(`apt-get`)는 **Ubuntu** 기준입니다. Amazon Linux 2 등이면 `yum`/`dnf` 및 패키지 이름을 맞춰 수정해야 합니다.
