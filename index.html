@@ -2,11 +2,21 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>배포 테스트 페이지  </title>
+    <title>배포 테스트 페이지</title>
 </head>
 <body>
     <h1>안녕하세요! GitHub Actions 배포 테스트 중입니다.</h1>
     <p>성공적으로 웹 서버에 업로드되었습니다.</p> 
     <p>3rd test</p>
-</body>
+
+    <script>
+        // 1. 하드코딩된 API 키 (보안 로봇이 가장 먼저 잡아내는 취약점)
+        const AWS_SECRET_KEY = "AKIAI0SFOENN7EXAMPLE"; 
+        
+        // 2. 테스트용 관리자 비밀번호 노출
+        const ADMIN_PASSWORD = "password1234!";
+
+        console.log("관리자 모드 활성화용 키:", AWS_SECRET_KEY);
+    </script>
+    </body>
 </html>
