@@ -9,8 +9,10 @@ on:
 env:
   CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
   CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
-  # URL 변수 정의
   CORTEX_API_URL: https://api-u-infra-260126-xdr.xdr.sg.paloaltonetworks.com
+  # ECR 이미지 배포용 (main.yml에서 ECR 푸시된 이미지로 docker run)
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: github-action-test-for-cortex
 
 jobs:
   security-scan:
@@ -41,20 +43,24 @@ jobs:
     needs: security-scan
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to EC2 via Docker
+      - name: Deploy to EC2 via Docker (ECR 이미지 사용)
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # 1. 기존에 돌아가던 웹 서버가 있다면 끄기
+            set -e
+            ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+            ECR_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+
+            # 1. 기존 컨테이너 정리
             docker stop my-web-server || true
             docker rm my-web-server || true
 
-            # 2. 최신 Nginx 이미지 가져오기 (Pull)
-            docker pull nginx:latest
+            # 2. ECR 로그인 (EC2 인스턴스에 IAM 역할 또는 AWS 자격 증명 필요)
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
 
-            # 3. Nginx 실행하기 (포트 80번 연결)
-            # 내 컴퓨터의 80번 문과 도커 안의 80번 문을 연결합니다.
-            docker run -d --name my-web-server -p 80:80 nginx:latest
+            # 3. ECR에 푸시된 이미지 Pull 후 실행
+            docker pull ${ECR_IMAGE}
+            docker run -d --name my-web-server -p 80:80 ${ECR_IMAGE}
