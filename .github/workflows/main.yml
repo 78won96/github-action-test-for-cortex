@@ -36,6 +36,7 @@ jobs:
           # 2. 스캔 실행 (옵션을 명령의 앞쪽으로 전진 배치)
           # ./cortexcli [공통 옵션] code scan [추가 옵션] 순서입니다.
           ./cortexcli --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS" --create-repo-if-missing
+  
   deploy:
     needs: security-scan
     runs-on: ubuntu-latest
