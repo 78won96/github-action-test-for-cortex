@@ -1,25 +1,61 @@
-name: Deploy to EC2
+name: Scan and Deploy to EC2
 
-# 언제 실행할 것인가?
 on:
   push:
     branches:
-      - main  # main 브랜치에 코드가 올라오면 실행
+      - main
+  workflow_dispatch: # 수동으로도 실행 가능하게 함
+
+env:
+  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
+  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
+  CORTEX_API_URL: https://api-u-infra-260126-xdr.xdr.sg.paloaltonetworks.com
 
 jobs:
-  deploy:
+  # [첫 번째 작업: 보안 스캔]
+  security-scan:
     runs-on: ubuntu-latest
     steps:
-      # 1. GitHub에 올린 코드를 가져오기
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download and Run Cortex CLI Scan
+        run: |
+          set -x
+          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+            -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+            -H "Authorization: ${CORTEX_API_KEY}")
+          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+          curl -o cortexcli $crtx_url
+          chmod +x cortexcli
+          ./cortexcli code scan \
+            --api-base-url "${CORTEX_API_URL}" \
+            --api-key "${CORTEX_API_KEY}" \
+            --api-key-id "${CORTEX_API_KEY_ID}" \
+            --directory "${{github.workspace}}" \
+            --repo-id "${{github.repository}}" \
+            --branch "${{github.ref_name}}" \
+            --source "GITHUB_ACTIONS" \
+            --create-repo-if-missing
+
+  # [두 번째 작업: 배포] - 보안 스캔이 성공해야만 실행됩니다.
+  deploy:
+    needs: security-scan # 보안 스캔이 끝나야 실행되도록 연결
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. AWS EC2에 접속해서 파일 전송하기
       - name: Deploy to Server
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}         # EC2 주소
-          username: ubuntu                      # 접속 아이디
-          key: ${{ secrets.EC2_SSH_KEY }}       # 아까 받은 .pem 키 내용
-          source: "index.html"                  # 보낼 파일
-          target: "/var/www/html"               # 서버 저장 위치
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "index.html"
+          target: "/var/www/html"
