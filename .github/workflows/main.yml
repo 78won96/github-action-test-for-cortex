@@ -28,7 +28,7 @@ jobs:
       - name: Build image
         run: docker build -t ${{ env.ECR_REPOSITORY }}:build .
 
-      - name: Set up Java (cortexcli 요구: Java 11 이상)
+      - name: "Set up Java (cortexcli 요구: Java 11 이상)"
         uses: actions/setup-java@v4
         with:
           distribution: temurin
