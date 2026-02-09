@@ -87,6 +87,9 @@ jobs:
             set -e
             ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
             ECR_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+            CORTEX_API_URL="${{ env.CORTEX_API_URL }}"
+            CORTEX_API_KEY="${{ secrets.CORTEX_API_KEY }}"
+            CORTEX_API_KEY_ID="${{ secrets.CORTEX_API_KEY_ID }}"
 
             # 1. 기존 컨테이너 정리
             docker stop my-web-server || true
@@ -95,6 +98,18 @@ jobs:
             # 2. ECR 로그인 (EC2 인스턴스에 IAM 역할 또는 AWS 자격 증명 필요)
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
 
-            # 3. ECR에 푸시된 이미지 Pull 후 실행
+            # 3. ECR 이미지 Pull
             docker pull ${ECR_IMAGE}
+
+            # 4. Cortex CLI 설치 후 Pull한 이미지 스캔 (Java 11+, libhyperscan5, jq 필요)
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq openjdk-11-jre-headless libhyperscan5 jq 2>/dev/null || true
+            crtx_resp=$(curl -s "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" -H "Authorization: ${CORTEX_API_KEY}")
+            crtx_url=$(echo "$crtx_resp" | jq -r ".signed_url")
+            crtx_file=$(echo "$crtx_resp" | jq -r ".file_name")
+            curl -s -o "$crtx_file" "$crtx_url"
+            chmod +x "$crtx_file"
+            ./"$crtx_file" --api-base-url "$CORTEX_API_URL" --api-key "$CORTEX_API_KEY" --api-key-id "$CORTEX_API_KEY_ID" image scan ${ECR_IMAGE}
+
+            # 5. 컨테이너 실행
             docker run -d --name my-web-server -p 80:80 ${ECR_IMAGE}
