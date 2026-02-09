@@ -36,8 +36,8 @@ jobs:
           crtx_file=$(echo $crtx_resp | jq -r ".file_name")
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
-          # 빌드된 Docker 이미지 스캔
-          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan --image ${{ env.ECR_REPOSITORY }}:build --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS"
+          # 빌드된 Docker 이미지 스캔 (image scan <image name>)
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
