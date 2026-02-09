@@ -4,3 +4,4 @@ FROM ubuntu:latest
 USER root
 # 취약점: 보안 업데이트를 하지 않고 오래된 패키지 사용
 RUN apt-get update && apt-get install -y telnet
+
