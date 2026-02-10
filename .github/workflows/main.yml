@@ -44,7 +44,9 @@ jobs:
           crtx_file=$(echo $crtx_resp | jq -r ".file_name")
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
-          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS" --create-repo-if-missing
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --branch main --repo-id "${{ github.repository }}" --output json --output-file-path ./code_scan_output.json --source "GITHUB_ACTIONS" --create-repo-if-missing
+          echo "========== Code scan 결과 (JSON) =========="
+          jq '.' ./code_scan_output.json 2>/dev/null || cat ./code_scan_output.json
 
   build-image-scan-push:
     name: Build image, Cortex image scan, Push to ECR
