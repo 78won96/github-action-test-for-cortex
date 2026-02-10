@@ -48,7 +48,7 @@ jobs:
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
           # 빌드된 Docker 이미지 스캔 (Cortex CLI --output csv: 상세 결과 CSV 출력)
-          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output csv
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output csv > scan_result.csv
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
