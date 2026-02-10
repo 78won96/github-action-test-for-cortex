@@ -47,18 +47,8 @@ jobs:
           crtx_file=$(echo $crtx_resp | jq -r ".file_name")
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
-
-          # image scan 사용 가능한 옵션 확인 (--output-file 등 SARIF 경로 옵션 확인용)
-          ./"$crtx_file" image scan --help 2>&1 || true
-
-          # SARIF 출력: CLI가 파일로 저장할 수 있으므로 stdout 캡처 + 생성된 .sarif 파일 확인
-          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output sarif 2>&1 | tee scan_output.txt
-
-          echo "========== SARIF 결과 (stdout 캡처) =========="
-          cat scan_output.txt
-
-          echo "========== 작업 디렉터리 내 .sarif 파일 =========="
-          find . -name "*.sarif" -type f 2>/dev/null | while read f; do echo "--- $f ---"; cat "$f"; done 
+          # 빌드된 Docker 이미지 스캔 (Cortex CLI --output json)
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output json | tee scan_result.json | jq '.' 
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -133,10 +123,7 @@ jobs:
             crtx_file=$(echo "$crtx_resp" | jq -r ".file_name")
             curl -s -o "$crtx_file" "$crtx_url"
             chmod +x "$crtx_file"
-            ./"$crtx_file" --api-base-url "$CORTEX_API_URL" --api-key "$CORTEX_API_KEY" --api-key-id "$CORTEX_API_KEY_ID" image scan ${ECR_IMAGE} --output sarif 2>&1 | tee scan_output.txt
-            echo "========== SARIF 결과 =========="
-            cat scan_output.txt
-            find . -name "*.sarif" -type f 2>/dev/null | while read f; do echo "--- $f ---"; cat "$f"; done
+            ./"$crtx_file" --api-base-url "$CORTEX_API_URL" --api-key "$CORTEX_API_KEY" --api-key-id "$CORTEX_API_KEY_ID" image scan ${ECR_IMAGE} --output json | tee scan_result.json | jq '.'
 
             # 6. 컨테이너 실행
             docker run -d --name my-web-server -p 80:80 ${ECR_IMAGE}
