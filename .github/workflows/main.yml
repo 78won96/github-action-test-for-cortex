@@ -47,33 +47,8 @@ jobs:
           crtx_file=$(echo $crtx_resp | jq -r ".file_name")
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
-
-          CRTX_CMD=("./$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}")
-          IMAGE_NAME="${{ env.ECR_REPOSITORY }}:build"
-
-          # 1) JSON 출력 지원 시 상세 결과 출력
-          echo "========== Cortex 이미지 스캔 (상세 모드 시도) =========="
-          if "${CRTX_CMD[@]}" image scan "$IMAGE_NAME" --output json 2>/dev/null > scan_result.json; then
-            echo "--- 스캔 결과 (전체 JSON) ---"
-            jq '.' scan_result.json
-            echo ""
-            echo "--- 취약점 목록 (요약) ---"
-            jq -r '
-              (.vulnerabilities // .findings // .results // .data // []) as $list |
-              if ($list | type) == "array" then
-                $list[] | "\(.severity // .Severity // "N/A"): \(.name // .cve_id // .cve // .id // "N/A") - \(.package_name // .package // .component // "N/A")"
-              else
-                . | to_entries[] | "\(.key): \(.value)"
-              end
-            ' scan_result.json 2>/dev/null || jq '.' scan_result.json
-          else
-            echo "(JSON 출력 미지원 또는 실패, 기본 스캔만 실행)"
-          fi
-
-          # 2) 기본 스캔 실행 (요약 테이블)
-          echo ""
-          echo "========== Cortex 이미지 스캔 (기본 요약) =========="
-          "${CRTX_CMD[@]}" image scan "$IMAGE_NAME"
+          # 빌드된 Docker 이미지 스캔 (image scan <image name>)
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -148,12 +123,6 @@ jobs:
             crtx_file=$(echo "$crtx_resp" | jq -r ".file_name")
             curl -s -o "$crtx_file" "$crtx_url"
             chmod +x "$crtx_file"
-            echo "========== Cortex 이미지 스캔 (상세) =========="
-            if ./"$crtx_file" --api-base-url "$CORTEX_API_URL" --api-key "$CORTEX_API_KEY" --api-key-id "$CORTEX_API_KEY_ID" image scan "${ECR_IMAGE}" --output json 2>/dev/null > scan_result.json; then
-              echo "--- 취약점/결과 상세 ---"
-              jq '.' scan_result.json 2>/dev/null || cat scan_result.json
-            fi
-            echo "========== Cortex 이미지 스캔 (요약) =========="
             ./"$crtx_file" --api-base-url "$CORTEX_API_URL" --api-key "$CORTEX_API_KEY" --api-key-id "$CORTEX_API_KEY_ID" image scan ${ECR_IMAGE}
 
             # 6. 컨테이너 실행
