@@ -14,8 +14,41 @@ env:
   CORTEX_API_URL: https://api-u-infra-260126-xdr.xdr.sg.paloaltonetworks.com
 
 jobs:
-  build-scan-push:
-    name: Build image, Cortex scan, Push to ECR
+  cortex-code-scan:
+    name: Cortex code scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: "Set up Java (cortexcli 요구: Java 11 이상)"
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Install Cortex CLI dependencies (libhs.so.5)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhyperscan5
+
+      - name: Download Cortex CLI and run code scan
+        run: |
+          set -x
+          crtx_resp=$(curl -s "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" -H "Authorization: ${{ env.CORTEX_API_KEY }}")
+          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+          crtx_file=$(echo $crtx_resp | jq -r ".file_name")
+          curl -o "$crtx_file" "$crtx_url"
+          chmod +x "$crtx_file"
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" code scan --directory "${{ github.workspace }}" --repo-id "${{ github.repository }}" --branch "main" --source "GITHUB_ACTIONS" --create-repo-if-missing
+
+  build-image-scan-push:
+    name: Build image, Cortex image scan, Push to ECR
+    needs: cortex-code-scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,7 +72,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libhyperscan5
 
-      - name: Download Cortex CLI and scan image
+      - name: Download Cortex CLI and run image scan
         run: |
           set -x
           crtx_resp=$(curl -s "${{ env.CORTEX_API_URL }}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" -H "x-xdr-auth-id: ${{ env.CORTEX_API_KEY_ID }}" -H "Authorization: ${{ env.CORTEX_API_KEY }}")
@@ -47,8 +80,10 @@ jobs:
           crtx_file=$(echo $crtx_resp | jq -r ".file_name")
           curl -o "$crtx_file" "$crtx_url"
           chmod +x "$crtx_file"
-          # 빌드된 Docker 이미지 스캔 (Cortex CLI --output sarif)
-          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output json --include-details
+          ./"$crtx_file" --api-base-url "${{ env.CORTEX_API_URL }}" --api-key "${{ env.CORTEX_API_KEY }}" --api-key-id "${{ env.CORTEX_API_KEY_ID }}" image scan ${{ env.ECR_REPOSITORY }}:build --output json > scan_result.json 2>&1
+          echo "--- 스캔 결과 (원본) ---"
+          cat scan_result.json
+          jq '.' scan_result.json 2>/dev/null || true
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -74,7 +109,7 @@ jobs:
 
   deploy:
     name: Deploy to EC2 (ECR image)
-    needs: build-scan-push
+    needs: build-image-scan-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to EC2 via Docker (ECR 이미지 사용)
